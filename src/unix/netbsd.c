@@ -87,7 +87,8 @@ int uv_exepath(char* buffer, size_t* size) {
   /* Copy string from the intermediate buffer to outer one with appropriate
    * length.
    */
-  strlcpy(buffer, int_buf, *size);
+  /* TODO(bnoordhuis) Check uv__strscpy() return value. */
+  uv__strscpy(buffer, int_buf, *size);
 
   /* Set new size. */
   *size = strlen(buffer);
@@ -122,6 +123,11 @@ uint64_t uv_get_total_memory(void) {
     return UV__ERR(errno);
 
   return (uint64_t) info;
+}
+
+
+uint64_t uv_get_constrained_memory(void) {
+  return 0;  /* Memory constraints are unknown. */
 }
 
 
@@ -229,13 +235,25 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
   return 0;
 }
 
+int uv__random_sysctl(void* buf, size_t len) {
+  static int name[] = {CTL_KERN, KERN_ARND};
+  size_t count, req;
+  unsigned char* p;
 
-void uv_free_cpu_info(uv_cpu_info_t* cpu_infos, int count) {
-  int i;
+  p = buf;
+  while (len) {
+    req = len < 32 ? len : 32;
+    count = req;
 
-  for (i = 0; i < count; i++) {
-    uv__free(cpu_infos[i].model);
+    if (sysctl(name, ARRAY_SIZE(name), p, &count, NULL, 0) == -1)
+      return UV__ERR(errno);
+
+    if (count != req)
+      return UV_EIO;  /* Can't happen. */
+
+    p += count;
+    len -= count;
   }
 
-  uv__free(cpu_infos);
+  return 0;
 }

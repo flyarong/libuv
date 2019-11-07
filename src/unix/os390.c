@@ -237,7 +237,7 @@ static int getexe(const int pid, char* buf, size_t len) {
     return -1;
   }
 
-  strncpy(buf, Output_path->path, len);
+  uv__strscpy(buf, Output_path->path, len);
 
   return 0;
 }
@@ -356,6 +356,11 @@ uint64_t uv_get_total_memory(void) {
 }
 
 
+uint64_t uv_get_constrained_memory(void) {
+  return 0;  /* Memory constraints are unknown. */
+}
+
+
 int uv_resident_set_memory(size_t* rss) {
   char* ascb;
   char* rax;
@@ -425,13 +430,6 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
   }
 
   return 0;
-}
-
-
-void uv_free_cpu_info(uv_cpu_info_t* cpu_infos, int count) {
-  for (int i = 0; i < count; ++i)
-    uv__free(cpu_infos[i].model);
-  uv__free(cpu_infos);
 }
 
 
@@ -657,6 +655,7 @@ void uv__platform_invalidate_fd(uv_loop_t* loop, int fd) {
   uintptr_t nfds;
 
   assert(loop->watchers != NULL);
+  assert(fd >= 0);
 
   events = (struct epoll_event*) loop->watchers[loop->nwatchers];
   nfds = (uintptr_t) loop->watchers[loop->nwatchers + 1];
