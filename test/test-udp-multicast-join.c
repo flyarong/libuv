@@ -60,7 +60,7 @@ static void close_cb(uv_handle_t* handle) {
 
 
 static void sv_send_cb(uv_udp_send_t* req, int status) {
-  ASSERT(req != NULL);
+  ASSERT_NOT_NULL(req);
   ASSERT(status == 0);
   CHECK_HANDLE(req->handle);
 
@@ -103,11 +103,11 @@ static void cl_recv_cb(uv_udp_t* handle,
 
   if (nread == 0) {
     /* Returning unused buffer. Don't count towards cl_recv_cb_called */
-    ASSERT(addr == NULL);
+    ASSERT_NULL(addr);
     return;
   }
 
-  ASSERT(addr != NULL);
+  ASSERT_NOT_NULL(addr);
   ASSERT(nread == 4);
   ASSERT(!memcmp("PING", buf->base, nread));
 
@@ -126,8 +126,10 @@ static void cl_recv_cb(uv_udp_t* handle,
     r = uv_udp_set_membership(&server, MULTICAST_ADDR, NULL, UV_LEAVE_GROUP);
     ASSERT(r == 0);
 
+#if !defined(__OpenBSD__) && !defined(__NetBSD__)
     r = uv_udp_set_source_membership(&server, MULTICAST_ADDR, NULL, source_addr, UV_JOIN_GROUP);
     ASSERT(r == 0);
+#endif
 
     r = do_send(&req_ss);
     ASSERT(r == 0);

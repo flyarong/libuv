@@ -37,6 +37,7 @@ static uv_tcp_t tcpServer;
 static uv_udp_t udpServer;
 static uv_pipe_t pipeServer;
 static uv_handle_t* server;
+static uv_udp_send_t* send_freelist;
 
 static void after_write(uv_write_t* req, int status);
 static void after_read(uv_stream_t*, ssize_t nread, const uv_buf_t* buf);
@@ -112,7 +113,7 @@ static void after_read(uv_stream_t* handle,
   }
 
   wr = (write_req_t*) malloc(sizeof *wr);
-  ASSERT(wr != NULL);
+  ASSERT_NOT_NULL(wr);
   wr->buf = uv_buf_init(buf->base, nread);
 
   if (uv_write(&wr->req, handle, &wr->buf, 1, after_write)) {
@@ -133,6 +134,14 @@ static void echo_alloc(uv_handle_t* handle,
   buf->len = suggested_size;
 }
 
+static void slab_alloc(uv_handle_t* handle,
+                       size_t suggested_size,
+                       uv_buf_t* buf) {
+  /* up to 16 datagrams at once */
+  static char slab[16 * 64 * 1024];
+  buf->base = slab;
+  buf->len = sizeof(slab);
+}
 
 static void on_connection(uv_stream_t* server, int status) {
   uv_stream_t* stream;
@@ -146,14 +155,14 @@ static void on_connection(uv_stream_t* server, int status) {
   switch (serverType) {
   case TCP:
     stream = malloc(sizeof(uv_tcp_t));
-    ASSERT(stream != NULL);
+    ASSERT_NOT_NULL(stream);
     r = uv_tcp_init(loop, (uv_tcp_t*)stream);
     ASSERT(r == 0);
     break;
 
   case PIPE:
     stream = malloc(sizeof(uv_pipe_t));
-    ASSERT(stream != NULL);
+    ASSERT_NOT_NULL(stream);
     r = uv_pipe_init(loop, (uv_pipe_t*)stream, 0);
     ASSERT(r == 0);
     break;
@@ -178,40 +187,49 @@ static void on_server_close(uv_handle_t* handle) {
   ASSERT(handle == server);
 }
 
+static uv_udp_send_t* send_alloc(void) {
+  uv_udp_send_t* req = send_freelist;
+  if (req != NULL)
+    send_freelist = req->data;
+  else
+    req = malloc(sizeof(*req));
+  return req;
+}
 
-static void on_send(uv_udp_send_t* req, int status);
-
+static void on_send(uv_udp_send_t* req, int status) {
+  ASSERT_NOT_NULL(req);
+  ASSERT(status == 0);
+  req->data = send_freelist;
+  send_freelist = req;
+}
 
 static void on_recv(uv_udp_t* handle,
                     ssize_t nread,
                     const uv_buf_t* rcvbuf,
                     const struct sockaddr* addr,
                     unsigned flags) {
-  uv_udp_send_t* req;
   uv_buf_t sndbuf;
+  uv_udp_send_t* req;
+
+  if (nread == 0) {
+    /* Everything OK, but nothing read. */
+    return;
+  }
 
   ASSERT(nread > 0);
   ASSERT(addr->sa_family == AF_INET);
 
-  req = malloc(sizeof(*req));
-  ASSERT(req != NULL);
-
-  sndbuf = *rcvbuf;
-  ASSERT(0 == uv_udp_send(req, handle, &sndbuf, 1, addr, on_send));
+  req = send_alloc();
+  ASSERT_NOT_NULL(req);
+  sndbuf = uv_buf_init(rcvbuf->base, nread);
+  ASSERT(0 <= uv_udp_send(req, handle, &sndbuf, 1, addr, on_send));
 }
-
-
-static void on_send(uv_udp_send_t* req, int status) {
-  ASSERT(status == 0);
-  free(req);
-}
-
 
 static int tcp4_echo_start(int port) {
   struct sockaddr_in addr;
   int r;
 
-  ASSERT(0 == uv_ip4_addr("0.0.0.0", port, &addr));
+  ASSERT(0 == uv_ip4_addr("127.0.0.1", port, &addr));
 
   server = (uv_handle_t*)&tcpServer;
   serverType = TCP;
@@ -277,8 +295,10 @@ static int tcp6_echo_start(int port) {
 
 
 static int udp4_echo_start(int port) {
+  struct sockaddr_in addr;
   int r;
 
+  ASSERT(0 == uv_ip4_addr("127.0.0.1", port, &addr));
   server = (uv_handle_t*)&udpServer;
   serverType = UDP;
 
@@ -288,7 +308,13 @@ static int udp4_echo_start(int port) {
     return 1;
   }
 
-  r = uv_udp_recv_start(&udpServer, echo_alloc, on_recv);
+  r = uv_udp_bind(&udpServer, (const struct sockaddr*) &addr, 0);
+  if (r) {
+    fprintf(stderr, "uv_udp_bind: %s\n", uv_strerror(r));
+    return 1;
+  }
+
+  r = uv_udp_recv_start(&udpServer, slab_alloc, on_recv);
   if (r) {
     fprintf(stderr, "uv_udp_recv_start: %s\n", uv_strerror(r));
     return 1;

@@ -44,6 +44,10 @@ extern char **environ;
 # include <grp.h>
 #endif
 
+#if defined(__MVS__)
+# include "zos-base.h"
+#endif
+
 
 static void uv__chld(uv_signal_t* handle, int signum) {
   uv_process_t* process;
@@ -111,76 +115,6 @@ static void uv__chld(uv_signal_t* handle, int signum) {
   assert(QUEUE_EMPTY(&pending));
 }
 
-
-int uv__make_socketpair(int fds[2], int flags) {
-#if defined(__linux__)
-  static int no_cloexec;
-
-  if (no_cloexec)
-    goto skip;
-
-  if (socketpair(AF_UNIX, SOCK_STREAM | UV__SOCK_CLOEXEC | flags, 0, fds) == 0)
-    return 0;
-
-  /* Retry on EINVAL, it means SOCK_CLOEXEC is not supported.
-   * Anything else is a genuine error.
-   */
-  if (errno != EINVAL)
-    return UV__ERR(errno);
-
-  no_cloexec = 1;
-
-skip:
-#endif
-
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds))
-    return UV__ERR(errno);
-
-  uv__cloexec(fds[0], 1);
-  uv__cloexec(fds[1], 1);
-
-  if (flags & UV__F_NONBLOCK) {
-    uv__nonblock(fds[0], 1);
-    uv__nonblock(fds[1], 1);
-  }
-
-  return 0;
-}
-
-
-int uv__make_pipe(int fds[2], int flags) {
-#if defined(__linux__)
-  static int no_pipe2;
-
-  if (no_pipe2)
-    goto skip;
-
-  if (uv__pipe2(fds, flags | UV__O_CLOEXEC) == 0)
-    return 0;
-
-  if (errno != ENOSYS)
-    return UV__ERR(errno);
-
-  no_pipe2 = 1;
-
-skip:
-#endif
-
-  if (pipe(fds))
-    return UV__ERR(errno);
-
-  uv__cloexec(fds[0], 1);
-  uv__cloexec(fds[1], 1);
-
-  if (flags & UV__F_NONBLOCK) {
-    uv__nonblock(fds[0], 1);
-    uv__nonblock(fds[1], 1);
-  }
-
-  return 0;
-}
-
-
 /*
  * Used for initializing stdio streams like options.stdin_stream. Returns
  * zero on success. See also the cleanup section in uv_spawn().
@@ -200,7 +134,7 @@ static int uv__process_init_stdio(uv_stdio_container_t* container, int fds[2]) {
     if (container->data.stream->type != UV_NAMED_PIPE)
       return UV_EINVAL;
     else
-      return uv__make_socketpair(fds, 0);
+      return uv_socketpair(SOCK_STREAM, 0, fds, 0, 0);
 
   case UV_INHERIT_FD:
   case UV_INHERIT_STREAM:
@@ -406,7 +340,11 @@ static void uv__process_child_init(const uv_process_options_t* options,
     _exit(127);
   }
 
+#ifdef __MVS__
+  execvpe(options->file, options->args, environ);
+#else
   execvp(options->file, options->args);
+#endif
   uv__write_int(error_fd, UV__ERR(errno));
   _exit(127);
 }
