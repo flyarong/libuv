@@ -126,6 +126,7 @@ extern "C" {
   XX(ENOTEMPTY, "directory not empty")                                        \
   XX(ENOTSOCK, "socket operation on non-socket")                              \
   XX(ENOTSUP, "operation not supported on socket")                            \
+  XX(EOVERFLOW, "value too large for defined data type")                      \
   XX(EPERM, "operation not permitted")                                        \
   XX(EPIPE, "broken pipe")                                                    \
   XX(EPROTO, "protocol error")                                                \
@@ -148,6 +149,7 @@ extern "C" {
   XX(ENOTTY, "inappropriate ioctl for device")                                \
   XX(EFTYPE, "inappropriate file type or format")                             \
   XX(EILSEQ, "illegal byte sequence")                                         \
+  XX(ESOCKTNOSUPPORT, "socket type not supported")                            \
 
 #define UV_HANDLE_TYPE_MAP(XX)                                                \
   XX(ASYNC, async)                                                            \
